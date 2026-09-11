@@ -7,7 +7,9 @@ Este repositorio no contiene credenciales ni datos de cuentas. Cada instalación
 ## Instalación
 
 ```sh
-bash ~/scripts/consumo-ia/install.sh
+git clone https://github.com/martingaldeca/consumo-ia.git
+cd consumo-ia
+bash ./install.sh
 ```
 
 Cierra sesión y vuelve a entrar después de actualizar. GNOME conserva el JavaScript cargado durante la sesión; volver a activar la extensión no sustituye esos módulos. El instalador no cierra tu sesión.
