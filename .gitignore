@@ -1,0 +1,11 @@
+# Local extension state and private credentials
+history.json
+.env
+.env.*
+*.log
+
+# GNOME and editor artifacts
+.directory
+.DS_Store
+.vscode/
+*.swp

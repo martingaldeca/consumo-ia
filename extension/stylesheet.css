@@ -1,0 +1,39 @@
+.ai-panel { spacing: 7px; }
+.ai-panel-icon { color: #5bdcfa; }
+.ai-menu-v2 .popup-menu-content { background-color: #11151f; color: #edf3fc; border: 1px solid #303a50; border-radius: 18px; padding: 6px; }
+.ai-menu-v2 .popup-menu-item { color: #c5d2e5; border-radius: 9px; margin: 2px 7px; padding: 9px 12px; }
+.ai-menu-v2 .popup-menu-item:focus, .ai-menu-v2 .popup-menu-item:hover { color: #ffffff; background-color: #283247; }
+.ai-header { padding: 14px 14px 12px; spacing: 14px; }
+.ai-heading { spacing: 5px; }
+.ai-title { font-family: monospace; font-size: 1.06em; font-weight: 700; color: #edf3fc; }
+.ai-muted { color: #a9b7cc; }
+.ai-small { font-size: 0.86em; }
+.ai-tiny { font-size: 0.77em; }
+.ai-mono { font-family: monospace; }
+.ai-icon-button { background-color: #202939; color: #c5d2e5; border-radius: 12px; padding: 10px; }
+.ai-icon-button:hover, .ai-icon-button:focus { color: #5bdcfa; background-color: #2b384c; }
+.ai-tabs { spacing: 5px; margin: 0 12px 12px; background-color: #0c1018; border: 1px solid #273146; border-radius: 11px; padding: 4px; }
+.ai-control { color: #a9b7cc; border-radius: 8px; padding: 7px 13px; font-weight: 600; }
+.ai-control:hover { background-color: #242e40; color: #edf3fc; }
+.ai-control:focus { box-shadow: inset 0 0 0 2px #5bdcfa; }
+.ai-selected { background-color: #253248; color: #7de5ff; }
+.ai-period-row { spacing: 5px; padding: 0 12px 10px; }
+.ai-period { font-size: 0.83em; padding: 6px 10px; }
+.ai-eyebrow { font-family: monospace; font-size: 0.72em; }
+.ai-body { spacing: 11px; padding: 0 12px 10px; }
+.ai-card { background-color: #1b2130; color: #edf3fc; border: 1px solid #303a50; border-radius: 13px; padding: 14px; spacing: 9px; }
+.ai-card-codex { border-top: 2px solid rgba(91, 220, 250, 0.55); }
+.ai-card-deepseek { border-top: 2px solid rgba(169, 146, 255, 0.6); }
+.ai-provider { font-weight: 700; font-size: 1.02em; }
+.ai-codex { color: #5bdcfa; }
+.ai-deepseek { color: #b4a0ff; }
+.ai-badge { color: #a9b7cc; font-family: monospace; font-size: 0.67em; }
+.ai-row { spacing: 10px; }
+.ai-hero { font-weight: 700; font-size: 1.9em; }
+.ai-meter { height: 8px; margin-top: 2px; margin-bottom: 3px; }
+.ai-stats { spacing: 10px; }
+.ai-stat { background-color: #151b27; border-radius: 8px; padding: 9px; spacing: 5px; }
+.ai-warning { color: #fbbf24; }
+.ai-chart { height: 110px; border-radius: 7px; }
+.ai-chart:focus { box-shadow: inset 0 0 0 1px #5bdcfa; }
+.ai-chart-detail { color: #d3dfee; }
