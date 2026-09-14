@@ -1,4 +1,5 @@
-import {normalizeCodex, normalizeDeepSeek, indicatorWindow, weeklyWindow, pace, countdown, money, UsageError} from '../extension/model.js';
+import {normalizeCodex, normalizeDeepSeek, indicatorWindow, weeklyWindow, pace, countdown, money, balanceFlow,
+    quotaCeiling, seriesWindow, valueWindow, UsageError} from '../extension/model.js';
 
 let passed = 0;
 function test(name, run) {
@@ -75,5 +76,36 @@ test('Se conservan monedas distintas, saldos negativos y promocionales', () => {
 test('Las cuentas atrás redondean sin mostrar tiempos negativos', () => {
     assert(countdown(now + 86400000 + 7200000, now) === '1 d 2 h');
     assert(countdown(now + 1, now) === '1 min');
+});
+test('El gasto se estima con las bajadas de saldo y separa las recargas', () => {
+    const samples = [
+        {time: now - 300000, currency: 'USD', total: 10},
+        {time: now - 240000, currency: 'USD', total: 8.5},
+        {time: now - 180000, currency: 'USD', total: 12},
+        {time: now - 120000, currency: 'USD', total: 11.25},
+        {time: now - 60000, currency: 'USD', total: 9.75},
+    ];
+    const flow = balanceFlow(samples, now - 86400000);
+    assert(Math.abs(flow.spent - 3.75) < 1e-9 && Math.abs(flow.added - 3.5) < 1e-9);
+    assert(flow.since === samples[0].time && flow.samples === 5);
+    const partial = balanceFlow(samples, now - 150000);
+    assert(Math.abs(partial.spent - 1.5) < 1e-9 && partial.added === 0);
+    const single = balanceFlow([samples[0]], 0);
+    assert(single.spent === null && single.added === null);
+    assert(balanceFlow([], 0).since === null);
+});
+test('La escala vertical parte del cero y se ajusta a los datos', () => {
+    assert(quotaCeiling(22) === 25 && quotaCeiling(96) === 100 && quotaCeiling(3) === 10);
+    const window = valueWindow([4.55, 2.51, 3.1], 0);
+    assert(window.minimum === 0 && window.maximum > 4.55 && window.maximum < 5);
+});
+test('La ventana del historial empieza en la primera muestra disponible', () => {
+    const now = Date.parse('2026-09-13T22:00:00Z');
+    const day = 86400000;
+    const period = now - 7 * day;
+    const points = [{time: now - day, value: 1}, {time: now, value: 2}];
+    const window = seriesWindow(points, period, now);
+    assert(window.start === now - day - 600000 && window.end === now);
+    assert(seriesWindow([], period, now).start === period);
 });
 print(passed + ' pruebas de datos correctas.');

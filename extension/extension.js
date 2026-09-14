@@ -10,8 +10,8 @@ import * as PopupMenu from 'resource:///org/gnome/shell/ui/popupMenu.js';
 import {UsageMonitor} from './monitor.js';
 import {HistoryStore} from './history.js';
 import {Chart, Meter, COLORS, cssColor} from './charts.js';
-import {age, countdown, errorMessage, indicatorWindow, money, number, pace, paceColor, percent,
-    periodStart, tokenPeriod, weeklyWindow} from './model.js';
+import {age, balanceFlow, countdown, errorMessage, indicatorWindow, money, number, pace, paceColor, percent,
+    periodStart, quotaCeiling, seriesWindow, tokenPeriod, tokenTotals, valueWindow, weeklyWindow} from './model.js';
 
 function label(text, style = '', expand = false) {
     return new St.Label({text, style_class: style, x_expand: expand, y_align: Clutter.ActorAlign.CENTER});
@@ -58,8 +58,24 @@ export default class ConsumoIA extends Extension {
         this._button = new PanelMenu.Button(0.5, 'Consumo IA');
         const panel = new St.BoxLayout({style_class: 'ai-panel', y_align: Clutter.ActorAlign.CENTER});
         panel.add_child(new St.Icon({icon_name: 'speedometer-symbolic', style_class: 'system-status-icon ai-panel-icon'}));
-        this._panelLabel = label('…');
-        panel.add_child(this._panelLabel);
+        const group = style => {
+            const box = new St.BoxLayout({style_class: 'ai-panel-group', y_align: Clutter.ActorAlign.CENTER, visible: false});
+            const parts = {
+                box,
+                letter: label('', 'ai-panel-letter ' + style),
+                value: label('', 'ai-panel-value'),
+                warning: label('', 'ai-panel-error'),
+            };
+            for (const actor of [parts.letter, parts.value, parts.warning])
+                box.add_child(actor);
+            panel.add_child(box);
+            return parts;
+        };
+        this._panelCodex = group('ai-panel-codex');
+        this._panelSeparator = label('·', 'ai-panel-separator');
+        this._panelSeparator.visible = false;
+        panel.add_child(this._panelSeparator);
+        this._panelDeepSeek = group('ai-panel-deepseek');
         this._button.add_child(panel);
         this._button.menu.actor.add_style_class_name('ai-menu-v2');
         this._buildMenu();
@@ -126,7 +142,7 @@ export default class ConsumoIA extends Extension {
         menu.box.add_child(header);
         const tabs = new St.BoxLayout({style_class: 'ai-tabs', x_expand: true});
         this._tabs = {};
-        for (const [id, text] of [['summary', 'Resumen'], ['activity', 'Actividad']]) {
+        for (const [id, text] of [['summary', 'Resumen'], ['activity', 'Actividad'], ['tokens', 'Tokens']]) {
             const button = action(text, () => {
                 this._tab = id;
                 this._render();
@@ -178,12 +194,14 @@ export default class ConsumoIA extends Extension {
         for (const provider of ['codex', 'deepseek'])
             this._monitor.setEnabled(provider, this._settings.get_boolean('show-' + provider));
         this._monitor.setEnabled('activity', this._settings.get_boolean('show-codex'));
+        this._monitor.setEnabled('sessions', this._settings.get_boolean('show-deepseek'));
         if (this._timer)
             GLib.Source.remove(this._timer);
         this._timer = GLib.timeout_add_seconds(GLib.PRIORITY_DEFAULT, this._settings.get_int('refresh-seconds'), () => {
             this._monitor.refresh('codex');
             this._monitor.refresh('deepseek');
             this._monitor.refresh('activity', true);
+            this._monitor.refresh('sessions', true);
             return GLib.SOURCE_CONTINUE;
         });
     }
@@ -218,20 +236,9 @@ export default class ConsumoIA extends Extension {
     _render() {
         if (!this._alive)
             return;
-        const {codex, deepseek, activity} = this._monitor.states;
+        const {codex, deepseek, activity, sessions} = this._monitor.states;
         const mode = this._settings.get_string('indicator-mode');
-        const parts = [];
-        if (codex.enabled && ['both', 'codex'].includes(mode)) {
-            const window = indicatorWindow(codex.data);
-            parts.push('C ' + (window ? percent(window.remaining) : '—') + (codex.error ? ' !' : ''));
-        }
-        if (deepseek.enabled && ['both', 'deepseek'].includes(mode)) {
-            const balance = deepseek.data?.balances[0];
-            parts.push('D ' + (balance ? money(balance.total, balance.currency, true) : '—') + (deepseek.error && deepseek.error !== 'credentials' ? ' !' : ''));
-        }
-        this._panelLabel.text = parts.join('  ·  ');
-        this._panelLabel.visible = parts.length > 0;
-        this._button.accessible_name = 'Consumo IA. ' + parts.join('. ').replace(/^C /, 'Codex ').replace(/D /, 'DeepSeek ');
+        this._renderIndicator(codex, deepseek, mode);
         const states = Object.values(this._monitor.states).filter(state => state.enabled);
         const busy = states.some(state => state.refreshing);
         const timestamps = [codex, deepseek].filter(state => state.enabled).map(state => state.updatedAt).filter(Boolean);
@@ -239,8 +246,8 @@ export default class ConsumoIA extends Extension {
         this._refreshButton.reactive = !busy && states.length > 0;
         this._refreshButton.opacity = busy ? 110 : 255;
         this._connectDeepSeek.visible = deepseek.enabled && ['credentials', 'unauthorized', 'keyring'].includes(deepseek.error);
-        this._dashboard.visible = deepseek.enabled && this._tab === 'activity';
-        this._periodRow.visible = this._tab === 'activity';
+        this._dashboard.visible = deepseek.enabled && ['activity', 'tokens'].includes(this._tab);
+        this._periodRow.visible = ['activity', 'tokens'].includes(this._tab);
         for (const [id, button] of Object.entries(this._tabs))
             button.set_style_class_name('ai-control ai-tab' + (id === this._tab ? ' ai-selected' : ''));
         for (const [days, button] of Object.entries(this._periodButtons))
@@ -257,11 +264,18 @@ export default class ConsumoIA extends Extension {
                 this._renderCodex(codex, activity);
             if (deepseek.enabled)
                 this._renderDeepSeek(deepseek);
+        } else if (this._tab === 'tokens') {
+            if (codex.enabled || deepseek.enabled)
+                this._renderCombined(codex, deepseek, activity, sessions);
+            if (codex.enabled)
+                this._renderTokenTotals(activity);
+            if (deepseek.enabled)
+                this._renderDeepSeekTokens(sessions);
+            if (this._history.error)
+                this._body.add_child(paragraph(this._history.error, 'ai-warning ai-small'));
         } else {
-            if (codex.enabled) {
-                this._renderTokens(activity);
+            if (codex.enabled)
                 this._renderQuotaHistory();
-            }
             if (deepseek.enabled)
                 this._renderBalanceHistory(deepseek);
             if (this._history.error)
@@ -272,6 +286,29 @@ export default class ConsumoIA extends Extension {
             this._charts[selection[0]].select(selection[1]);
             this._charts[selection[0]].grab_key_focus();
         }
+    }
+
+    _renderIndicator(codex, deepseek, mode) {
+        const window = indicatorWindow(codex.data);
+        const balance = deepseek.data?.balances[0] ?? null;
+        const showCodex = codex.enabled && ['both', 'codex'].includes(mode);
+        const showDeepSeek = deepseek.enabled && ['both', 'deepseek'].includes(mode);
+        this._panelCodex.box.visible = showCodex;
+        this._panelCodex.letter.text = 'C';
+        this._panelCodex.value.text = window ? percent(window.remaining) : '—';
+        this._panelCodex.value.set_style(window ? 'color: ' + cssColor(paceColor(window)) + ';' : '');
+        this._panelCodex.warning.text = codex.error ? '!' : '';
+        this._panelDeepSeek.box.visible = showDeepSeek;
+        this._panelDeepSeek.letter.text = 'D';
+        this._panelDeepSeek.value.text = balance ? money(balance.total, balance.currency, true) : '—';
+        this._panelDeepSeek.warning.text = deepseek.error && deepseek.error !== 'credentials' ? '!' : '';
+        this._panelSeparator.visible = showCodex && showDeepSeek;
+        const parts = [];
+        if (showCodex)
+            parts.push('C ' + this._panelCodex.value.text + (this._panelCodex.warning.text ? ' !' : ''));
+        if (showDeepSeek)
+            parts.push('D ' + this._panelDeepSeek.value.text + (this._panelDeepSeek.warning.text ? ' !' : ''));
+        this._button.accessible_name = 'Consumo IA. ' + parts.join('. ').replace(/^C /, 'Codex ').replace(/D /, 'DeepSeek ');
     }
 
     _renderCodex(state, activity) {
@@ -333,45 +370,135 @@ export default class ConsumoIA extends Extension {
         card.add_child(detail);
     }
 
-    _renderTokens(state) {
-        const card = this._card('Tokens de Codex', 'ACTIVIDAD', 'codex');
+    _tile(title, value, style = '') {
+        const tile = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'ai-stat'});
+        tile.add_child(label(title, 'ai-muted ai-tiny'));
+        tile.add_child(label(value, 'ai-stat-value ' + style));
+        return tile;
+    }
+
+    _amount(value, suffix, compact = true) {
+        return value === null || value === undefined ? '—' : number(value, compact) + ' ' + suffix;
+    }
+
+    _tokenGrid(card, totals, style) {
+        const grid = new St.BoxLayout({vertical: true, x_expand: true, style_class: 'ai-totals'});
+        for (const [title, value] of [['Hoy', totals.today], ['7 días', totals.week], ['30 días', totals.month]])
+            grid.add_child(row(label(title, 'ai-muted ai-small'), label(this._amount(value, 'tokens'), 'ai-mono ai-small')));
+        grid.add_child(row(label('Acumulado total', 'ai-muted ai-small'), label(this._amount(totals.lifetime, 'tokens'), 'ai-mono ai-small ' + style)));
+        card.add_child(grid);
+    }
+
+    _addTokenChart(card, id, data, color) {
+        const period = tokenPeriod(data, this._days);
+        const values = period.daily.map(day => day.tokens);
+        const {maximum} = valueWindow(values.length ? values : [0], 0);
+        this._addChart(card, id, {
+            points: period.daily.map(day => ({time: Date.parse(day.date + 'T12:00:00Z'), value: day.tokens})),
+            start: periodStart(this._days), end: periodStart(1) + 86400000,
+            color, kind: 'bars', minimum: 0, maximum,
+            topLabel: number(maximum, true), bottomLabel: '0',
+            describe: point => dateLabel(point.time) + ' · ' + number(point.value) + ' tokens',
+        });
+    }
+
+    _renderCombined(codex, deepseek, activity, sessions) {
+        const badge = [codex.enabled ? 'CODEX' : null, deepseek.enabled ? 'DEEPSEEK' : null].filter(Boolean).join(' · ');
+        const card = this._card(codex.enabled && deepseek.enabled ? 'En conjunto' : 'Consumo del período', badge, 'mixed');
+        const tiles = new St.BoxLayout({style_class: 'ai-stats', x_expand: true});
+        const codexPeriod = tokenPeriod(activity.data, this._days);
+        const deepseekPeriod = tokenPeriod(sessions.data, this._days);
+        if (codex.enabled)
+            tiles.add_child(this._tile('TOKENS DE CODEX · PERÍODO', number(codexPeriod.total, true), 'ai-codex'));
+        if (deepseek.enabled)
+            tiles.add_child(this._tile('TOKENS DE DEEPSEEK · PERÍODO', number(deepseekPeriod.total, true), 'ai-deepseek'));
+        card.add_child(tiles);
+        const balance = deepseek.data?.balances[0] ?? null;
+        const currency = balance?.currency ?? 'USD';
+        const flow = deepseek.enabled
+            ? balanceFlow(this._history.data.balances.filter(point => point.currency === currency), periodStart(this._days))
+            : null;
+        if (codex.enabled && deepseek.enabled) {
+            const total = codexPeriod.total === null || deepseekPeriod.total === null ? null : codexPeriod.total + deepseekPeriod.total;
+            card.add_child(row(label('En conjunto · período', 'ai-muted ai-small'), label(this._amount(total, 'tokens'), 'ai-mono ai-small ai-mixed')));
+        }
+        if (codex.enabled)
+            card.add_child(row(label('Codex · acumulado total', 'ai-muted ai-small'),
+                label(this._amount(activity.data?.summary.lifetimeTokens, 'tokens'), 'ai-mono ai-small ai-codex')));
+        if (deepseek.enabled) {
+            card.add_child(row(label('DeepSeek · acumulado registrado', 'ai-muted ai-small'),
+                label(this._amount(sessions.data?.summary.lifetimeTokens, 'tokens'), 'ai-mono ai-small ai-deepseek')));
+            card.add_child(row(label('DeepSeek · gastado en el período', 'ai-muted ai-small'),
+                label(flow.spent === null ? '—' : money(flow.spent, currency), 'ai-mono ai-small ai-deepseek')));
+            if (flow.added > 0)
+                card.add_child(row(label('DeepSeek · recargado en el período', 'ai-muted ai-small'),
+                    label(money(flow.added, currency), 'ai-mono ai-small ai-deepseek')));
+            card.add_child(row(label('DeepSeek · saldo actual', 'ai-muted ai-small'),
+                label(balance ? money(balance.total, currency) : '—', 'ai-mono ai-small ai-deepseek')));
+            card.add_child(paragraph('Los tokens de DeepSeek provienen de tus sesiones locales de Codex; el gasto, de las bajadas de saldo del historial.', 'ai-muted ai-tiny'));
+            if (flow.spent === null)
+                card.add_child(paragraph('Todavía no hay dos muestras de saldo en este período.', 'ai-muted ai-tiny'));
+        }
+        for (const state of [deepseek, sessions]) {
+            if (state.error)
+                card.add_child(paragraph(errorMessage(state.error), 'ai-warning ai-small'));
+        }
+    }
+
+    _renderTokenTotals(state) {
+        const card = this._card('Tokens de Codex', 'ACUMULADO · UTC', 'codex');
         if (state.data) {
             const period = tokenPeriod(state.data, this._days);
             card.add_child(row(label(number(period.total, true), 'ai-hero ai-mono ai-codex'), label('tokens del período', 'ai-muted ai-small')));
             if (period.observedDays < period.expectedDays)
                 card.add_child(label(period.observedDays + ' de ' + period.expectedDays + ' días con datos', 'ai-muted ai-small'));
-            const start = periodStart(this._days);
-            const end = periodStart(1) + 86400000;
-            this._addChart(card, 'tokens', {
-                points: period.daily.map(day => ({time: Date.parse(day.date + 'T12:00:00Z'), value: day.tokens})),
-                start, end, color: COLORS.codex, kind: 'bars', minimum: 0,
-                describe: point => dateLabel(point.time) + ' · ' + number(point.value) + ' tokens',
-            });
-            card.add_child(row(label('Total acumulado', 'ai-muted ai-small'), label(number(state.data.summary.lifetimeTokens, true), 'ai-mono ai-small')));
-            card.add_child(row(label('Pico diario', 'ai-muted ai-small'), label(number(state.data.summary.peakDailyTokens, true), 'ai-mono ai-small')));
+            this._tokenGrid(card, tokenTotals(state.data), 'ai-codex');
+            this._addTokenChart(card, 'tokens', state.data, COLORS.codex);
+            card.add_child(row(label('Pico diario', 'ai-muted ai-small'), label(this._amount(state.data.summary.peakDailyTokens, 'tokens'), 'ai-mono ai-small')));
+            card.add_child(row(label('Racha actual', 'ai-muted ai-small'), label(this._amount(state.data.summary.currentStreakDays, 'días', false), 'ai-mono ai-small')));
             card.add_child(label('Días agrupados en UTC', 'ai-muted ai-tiny'));
+        }
+        this._stateNote(card, state);
+    }
+
+    _renderDeepSeekTokens(state) {
+        const card = this._card('Tokens de DeepSeek', 'SESIONES LOCALES · UTC', 'deepseek');
+        if (state.data) {
+            const period = tokenPeriod(state.data, this._days);
+            card.add_child(row(label(number(period.total, true), 'ai-hero ai-mono ai-deepseek'), label('tokens del período', 'ai-muted ai-small')));
+            if (period.observedDays < period.expectedDays)
+                card.add_child(label(period.observedDays + ' de ' + period.expectedDays + ' días con datos', 'ai-muted ai-small'));
+            this._tokenGrid(card, tokenTotals(state.data), 'ai-deepseek');
+            this._addTokenChart(card, 'deepseek-tokens', state.data, COLORS.deepseek);
+            card.add_child(row(label('Pico diario', 'ai-muted ai-small'), label(this._amount(state.data.summary.peakDailyTokens, 'tokens'), 'ai-mono ai-small')));
+            card.add_child(paragraph('Contados por tus sesiones locales de Codex con DeepSeek; no incluyen otros clientes ni el gasto en dólares.', 'ai-muted ai-tiny'));
         }
         this._stateNote(card, state);
     }
 
     _renderQuotaHistory() {
         const card = this._card('Evolución de cuota', 'CODEX', 'codex');
-        const start = periodStart(this._days);
-        const points = this._history.data.quota.filter(point => point.time >= start)
+        const period = periodStart(this._days);
+        const points = this._history.data.quota.filter(point => point.time >= period)
             .map(point => ({...point, value: point.used}));
-        this._addChart(card, 'quota', {points, start, end: Date.now(), color: COLORS.codex, minimum: 0, maximum: 100,
+        const maximum = quotaCeiling(Math.max(0, ...points.map(point => point.value)));
+        this._addChart(card, 'quota', {...seriesWindow(points, period), points, color: COLORS.codex, minimum: 0, maximum,
+            topLabel: percent(maximum), bottomLabel: percent(0),
             describe: point => dateLabel(point.time, true) + ' UTC · ' + percent(point.value, 1) + ' usado'});
-        card.add_child(paragraph('Cada trazo corresponde a un ciclo semanal. Los huecos indican períodos sin observaciones.', 'ai-muted ai-tiny'));
+        card.add_child(paragraph('La escala se ajusta a lo observado. Los trazos continuos son muestras seguidas y los discontinuos, huecos sin observaciones.', 'ai-muted ai-tiny'));
     }
 
     _renderBalanceHistory(state) {
-        const start = periodStart(this._days);
-        const samples = this._history.data.balances.filter(point => point.time >= start);
+        const period = periodStart(this._days);
+        const samples = this._history.data.balances.filter(point => point.time >= period);
         const currencies = [...new Set([...(state.data?.balances.map(balance => balance.currency) ?? []), ...samples.map(point => point.currency)])];
         for (const currency of currencies.length ? currencies : ['USD']) {
             const card = this._card('Evolución de saldo', 'DEEPSEEK · ' + currency, 'deepseek');
             const points = samples.filter(point => point.currency === currency).map(point => ({...point, value: point.total}));
-            this._addChart(card, 'balance-' + currency, {points, start, end: Date.now(), color: COLORS.deepseek,
+            const {minimum, maximum} = valueWindow(points.length ? points.map(point => point.value) : [0]);
+            this._addChart(card, 'balance-' + currency, {...seriesWindow(points, period), points, color: COLORS.deepseek, minimum, maximum,
+                topLabel: money(maximum, currency, true), bottomLabel: money(minimum, currency, true),
+                fill: false,
                 describe: point => dateLabel(point.time, true) + ' UTC · ' + money(point.value, currency)});
             card.add_child(paragraph('Registrado desde esta actualización. Las variaciones pueden incluir consumo y recargas.', 'ai-muted ai-tiny'));
             this._stateNote(card, state);
@@ -395,7 +522,8 @@ export default class ConsumoIA extends Extension {
         this._settingsSignal = 0;
         this._button?.destroy();
         for (const key of ['_button', '_monitor', '_history', '_settings', '_charts', '_body', '_tabs',
-            '_periodButtons', '_periodRow', '_panelLabel', '_updated', '_scroll', '_refreshButton', '_dashboard', '_connectDeepSeek'])
+            '_periodButtons', '_periodRow', '_panelCodex', '_panelDeepSeek', '_panelSeparator', '_updated', '_scroll',
+            '_refreshButton', '_dashboard', '_connectDeepSeek'])
             this[key] = null;
     }
 }

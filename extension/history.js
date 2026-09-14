@@ -53,19 +53,6 @@ export function recordSample(history, provider, data, time = Date.now()) {
     return true;
 }
 
-export function segments(points, gapMs = 3 * SAMPLE_MS) {
-    const result = [];
-    for (const point of points) {
-        const current = result.at(-1);
-        const previous = current?.at(-1);
-        if (!previous || point.time - previous.time > gapMs || point.reset !== previous.reset)
-            result.push([point]);
-        else
-            current.push(point);
-    }
-    return result;
-}
-
 export class HistoryStore {
     constructor(path = GLib.build_filenamev([GLib.get_user_data_dir(), 'consumo-ia', 'history.json'])) {
         this.file = Gio.File.new_for_path(path);

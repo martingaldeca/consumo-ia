@@ -1,6 +1,6 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
-import {HistoryStore, emptyHistory, normalizeHistory, recordSample, segments, RETENTION_MS} from '../extension/history.js';
+import {HistoryStore, emptyHistory, normalizeHistory, recordSample, RETENTION_MS} from '../extension/history.js';
 
 const loop = new GLib.MainLoop(null, false);
 let failure = null;
@@ -40,13 +40,6 @@ async function run() {
         data.quota.push({time: now, used: 'invalid', reset: null});
         const clean = normalizeHistory(data, now);
         assert(clean.quota.length === 1 && !Object.hasOwn(clean.quota[0], 'unexpected'));
-    });
-    await test('Los huecos y reinicios separan los trazos', () => {
-        const groups = segments([
-            {time: now, reset: 1}, {time: now + 300000, reset: 1},
-            {time: now + 1200001, reset: 1}, {time: now + 1500000, reset: 2},
-        ]);
-        assert(groups.length === 3 && groups[0].length === 2);
     });
     await test('Escritura atómica, permisos privados y recuperación al reiniciar', async () => {
         const directory = GLib.dir_make_tmp('consumo-ia-history-test-XXXXXX');

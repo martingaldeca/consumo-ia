@@ -18,6 +18,7 @@ export function errorMessage(code) {
         codex: 'No se pudo consultar Codex. Revisa tu sesión.',
         missingBinary: 'No se encuentra CodexBar en ~/.local/bin.',
         activity: 'No se pudo consultar la actividad de Codex.',
+        sessions: 'No se encontraron sesiones de Codex con DeepSeek en ~/.codex-deepseek.',
         unsupported: 'Esta versión de Codex no ofrece estadísticas de tokens.',
     }[code] ?? 'No se pudo actualizar el consumo.';
 }
@@ -139,6 +140,46 @@ export function tokenPeriod(data, days, now = Date.now()) {
     const daily = (data?.daily ?? []).filter(day => day.date >= start && day.date <= end);
     return {daily, total: daily.length ? daily.reduce((sum, day) => sum + day.tokens, 0) : null,
         observedDays: daily.length, expectedDays: days};
+}
+
+export function tokenTotals(data, now = Date.now()) {
+    return {
+        today: tokenPeriod(data, 1, now).total,
+        week: tokenPeriod(data, 7, now).total,
+        month: tokenPeriod(data, 30, now).total,
+        lifetime: data?.summary.lifetimeTokens ?? null,
+    };
+}
+
+export function balanceFlow(samples, since = 0) {
+    const points = (samples ?? []).filter(point => Number.isFinite(point?.total) && point.time >= since);
+    let spent = 0;
+    let added = 0;
+    for (let index = 1; index < points.length; index++) {
+        const change = points[index].total - points[index - 1].total;
+        if (change < 0)
+            spent -= change;
+        else
+            added += change;
+    }
+    const observed = points.length > 1;
+    return {spent: observed ? spent : null, added: observed ? added : null, since: points[0]?.time ?? null, samples: points.length};
+}
+
+export function valueWindow(values, floor = null) {
+    const low = Math.min(...values);
+    const high = Math.max(...values);
+    const padding = Math.max((high - low) * 0.12, Math.abs(high) * 0.03, 0.01);
+    return {minimum: floor ?? low - padding, maximum: high + padding};
+}
+
+export function quotaCeiling(highest) {
+    return Math.min(100, Math.max(10, Math.ceil(highest * 1.1 / 5) * 5));
+}
+
+export function seriesWindow(points, start, now = Date.now()) {
+    const first = points.at(0)?.time ?? start;
+    return {start: Math.max(start, first - 600000), end: Math.max(now, first + 60000)};
 }
 
 export function number(value, compact = false) {

@@ -1,7 +1,7 @@
 {
   "uuid": "consumo-ia@local",
   "name": "Consumo IA",
-  "description": "Cuota semanal, tokens de Codex y evolución del saldo de DeepSeek en tu barra superior.",
+  "description": "Cuota semanal, tokens de Codex y de DeepSeek, y evolución del saldo en tu barra superior.",
   "shell-version": ["46"],
   "settings-schema": "org.gnome.shell.extensions.consumo-ia",
   "version": 2

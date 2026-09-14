@@ -1,4 +1,4 @@
-import {normalizeActivity, paceColor, periodStart, tokenPeriod} from '../extension/model.js';
+import {normalizeActivity, paceColor, periodStart, tokenPeriod, tokenTotals} from '../extension/model.js';
 
 let passed = 0;
 function assert(value) {
@@ -49,5 +49,16 @@ test('Los períodos usan días UTC y excluyen datos fuera del intervalo', () => 
         {startDate: '2026-09-12', tokens: 1000},
     ]});
     assert(tokenPeriod(data, 7, now).total === 16);
+});
+test('Los totales de tokens muestran cada período y el acumulado', () => {
+    const data = normalizeActivity({summary: {lifetimeTokens: 11000000000}, dailyUsageBuckets: [
+        {startDate: '2026-09-11', tokens: 11},
+        {startDate: '2026-09-08', tokens: 4},
+        {startDate: '2026-08-01', tokens: 1000},
+    ]});
+    const totals = tokenTotals(data, now);
+    assert(totals.today === 11 && totals.week === 15 && totals.month === 15 && totals.lifetime === 11000000000);
+    const empty = tokenTotals(normalizeActivity({}), now);
+    assert(empty.today === null && empty.lifetime === null);
 });
 print(passed + ' pruebas de actividad correctas.');

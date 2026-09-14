@@ -1,0 +1,61 @@
+#!/usr/bin/env bash
+# Consumo IA CodexBar compatibility adapter.
+set -euo pipefail
+
+if [[ "${1:-}" != "usage" ]]; then
+    echo 'Uso: codexbar usage --provider codex --source oauth --format json --no-credits' >&2
+    exit 2
+fi
+shift
+
+while (($#)); do
+    case "$1" in
+        --provider|--source|--format)
+            (($# >= 2)) || { echo "Falta un valor para $1" >&2; exit 2; }
+            shift 2
+            ;;
+        --no-credits)
+            shift
+            ;;
+        *)
+            echo "Opción no soportada: $1" >&2
+            exit 2
+            ;;
+    esac
+done
+
+waybar_binary="${CODEXBAR_WAYBAR_BINARY:-$HOME/.local/bin/codexbar-waybar}"
+cache_file="${CODEXBAR_CACHE_FILE:-$HOME/.cache/codexbar/usage.json}"
+
+if [[ ! -x "$waybar_binary" ]]; then
+    echo "No se encuentra el proveedor CodexBar en $waybar_binary" >&2
+    exit 1
+fi
+command -v jq >/dev/null || { echo 'Se necesita jq para leer el uso de Codex' >&2; exit 1; }
+
+# Reuse the authenticated CodexBar fetcher. Its output is deliberately ignored;
+# this compatibility command consumes the raw cache it refreshes.
+"$waybar_binary" --format '{weekly_pct}' --tooltip-format '' >/dev/null
+
+if [[ ! -r "$cache_file" ]]; then
+    echo "CodexBar no ha generado el caché $cache_file" >&2
+    exit 1
+fi
+
+jq -c '
+    def window:
+        if . == null then null
+        elif type != "object" then error("window is not an object")
+        elif (.used_percent | type) != "number" or .used_percent < 0 then error("invalid used_percent")
+        elif (.limit_window_seconds | type) != "number" or .limit_window_seconds <= 0 then error("invalid limit_window_seconds")
+        else {
+            usedPercent: .used_percent,
+            windowMinutes: (.limit_window_seconds / 60 | floor),
+            resetsAt: (.reset_at | if type == "number" and . > 0 then todateiso8601 else null end)
+        }
+        end;
+    [{provider: "codex", usage: {
+        primary: (.rate_limit.primary_window | window),
+        secondary: (.rate_limit.secondary_window | window)
+    }}]
+' "$cache_file"

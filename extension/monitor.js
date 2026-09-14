@@ -1,9 +1,10 @@
 import Gio from 'gi://Gio';
 import GLib from 'gi://GLib';
 import {fetchCodex, fetchDeepSeek, fetchCodexActivity} from './providers.js';
+import {fetchDeepSeekSessions} from './sessions.js';
 
 export class UsageMonitor {
-    constructor(onChange, providers = {codex: fetchCodex, deepseek: fetchDeepSeek, activity: fetchCodexActivity}) {
+    constructor(onChange, providers = {codex: fetchCodex, deepseek: fetchDeepSeek, activity: fetchCodexActivity, sessions: fetchDeepSeekSessions}) {
         this.onChange = onChange;
         this.providers = providers;
         this.disposed = false;
@@ -34,7 +35,7 @@ export class UsageMonitor {
         const state = this.states[provider];
         if (this.disposed || !state.enabled || this.jobs.has(provider))
             return;
-        if (staleOnly && state.attemptedAt && Date.now() - state.attemptedAt < (provider === 'activity' ? 900000 : 30000))
+        if (staleOnly && state.attemptedAt && Date.now() - state.attemptedAt < (['activity', 'sessions'].includes(provider) ? 900000 : 30000))
             return;
         const job = {cancellable: new Gio.Cancellable(), timeout: 0, timedOut: false};
         this.jobs.set(provider, job);

@@ -1,9 +1,14 @@
 import Clutter from 'gi://Clutter';
 import GObject from 'gi://GObject';
+import Pango from 'gi://Pango';
+import PangoCairo from 'gi://PangoCairo';
 import St from 'gi://St';
-import {segments} from './history.js';
+import {paintSeries, runs, smoothSpans} from './series.js';
 
 export const COLORS = {codex: [91, 220, 250], deepseek: [169, 146, 255]};
+
+const AXIS_GUTTER = 44;
+const AXIS_FONT = 'Sans 7';
 
 export function cssColor(color) {
     return 'rgb(' + color.join(',') + ')';
@@ -48,7 +53,8 @@ export const Meter = GObject.registerClass({GTypeName: 'ConsumoIAMeterV2'}, clas
 });
 
 export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, class Chart extends St.DrawingArea {
-    _init({points, start, end, color, kind = 'line', maximum = null, minimum = null, describe, onSelect}) {
+    _init({points, start, end, color, kind = 'line', maximum = null, minimum = null,
+        topLabel = null, bottomLabel = null, fill = true, describe, onSelect}) {
         super._init({style_class: 'ai-chart', x_expand: true, reactive: true, can_focus: true,
             accessible_name: 'Gráfica. Usa las flechas izquierda y derecha para consultar valores.'});
         this.points = points;
@@ -57,6 +63,9 @@ export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, clas
         this._end = Math.max(start + 1, end);
         this._color = color;
         this._kind = kind;
+        this._topLabel = topLabel;
+        this._bottomLabel = bottomLabel;
+        this._fill = fill;
         this._describe = describe;
         this._onSelect = onSelect;
         const values = points.map(point => point.value);
@@ -69,8 +78,8 @@ export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, clas
         this.connect('motion-event', (_actor, event) => {
             const [ok, localX] = this.transform_stage_point(...event.get_coords());
             if (ok) {
-                const width = this.get_width();
-                const time = this._start + Math.max(0, Math.min(1, (localX - 8) / Math.max(1, width - 16))) * (this._end - this._start);
+                const {left, plotWidth} = this._geometry(this.get_width(), this.get_height());
+                const time = this._start + Math.max(0, Math.min(1, (localX - left) / plotWidth)) * (this._end - this._start);
                 let nearest = 0;
                 for (let i = 1; i < points.length; i++) {
                     if (Math.abs(points[i].time - time) < Math.abs(points[nearest].time - time))
@@ -91,6 +100,14 @@ export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, clas
         this.select(this.index);
     }
 
+    _geometry(width, height) {
+        const axis = this._topLabel !== null || this._bottomLabel !== null;
+        const left = 8 + (axis ? AXIS_GUTTER : 0);
+        const top = axis ? 16 : 9;
+        const bottom = axis ? 13 : 9;
+        return {left, top, plotWidth: Math.max(1, width - left - 8), plotHeight: Math.max(1, height - top - bottom)};
+    }
+
     select(index) {
         this.index = Math.max(0, Math.min(this.points.length - 1, index));
         const point = this.points[this.index];
@@ -104,13 +121,17 @@ export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, clas
 
     _draw() {
         const cr = this.get_context();
-        const [width, height] = this.get_surface_size();
-        const left = 8;
-        const top = 9;
-        const plotWidth = Math.max(1, width - 16);
-        const plotHeight = Math.max(1, height - 18);
+        const [surfaceWidth, surfaceHeight] = this.get_surface_size();
+        const width = this.get_width();
+        const scale = width > 0 ? surfaceWidth / width : 1;
+        cr.save();
+        cr.scale(scale, scale);
+        const [logicalWidth, logicalHeight] = [surfaceWidth / scale, surfaceHeight / scale];
+        const {left, top, plotWidth, plotHeight} = this._geometry(logicalWidth, logicalHeight);
+        const base = top + plotHeight;
         const x = point => left + (point.time - this._start) / (this._end - this._start) * plotWidth;
         const y = point => top + plotHeight * (1 - Math.min(1, Math.max(0, (point.value - this._minimum) / (this._maximum - this._minimum || 1))));
+        this._drawAxis(cr, {left, top, base});
         cr.setLineWidth(1);
         for (let i = 0; i < 3; i++) {
             source(cr, [169, 183, 204], 0.12);
@@ -127,30 +148,7 @@ export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, clas
                 cr.fill();
             }
         } else {
-            for (const group of segments(this.points)) {
-                source(cr, this._color, 0.1);
-                cr.moveTo(x(group[0]), top + plotHeight);
-                cr.lineTo(x(group[0]), y(group[0]));
-                for (let i = 1; i < group.length; i++) {
-                    cr.lineTo(x(group[i]), y(group[i - 1]));
-                    cr.lineTo(x(group[i]), y(group[i]));
-                }
-                cr.lineTo(x(group.at(-1)), top + plotHeight);
-                cr.closePath();
-                cr.fill();
-                source(cr, this._color);
-                cr.setLineWidth(2);
-                cr.moveTo(x(group[0]), y(group[0]));
-                for (let i = 1; i < group.length; i++) {
-                    cr.lineTo(x(group[i]), y(group[i - 1]));
-                    cr.lineTo(x(group[i]), y(group[i]));
-                }
-                cr.stroke();
-                if (group.length === 1) {
-                    cr.arc(x(group[0]), y(group[0]), 2.5, 0, 2 * Math.PI);
-                    cr.fill();
-                }
-            }
+            this._drawLine(cr, {left, base, plotWidth, nodes: this.points.map(point => ({x: x(point), y: y(point)}))});
         }
         const selected = this.points[this.index];
         if (selected) {
@@ -163,6 +161,26 @@ export const Chart = GObject.registerClass({GTypeName: 'ConsumoIAChartV2'}, clas
             cr.arc(x(selected), y(selected), 3, 0, 2 * Math.PI);
             cr.fill();
         }
+        cr.restore();
         cr.$dispose();
+    }
+
+    _drawAxis(cr, {left, top, base}) {
+        for (const [text, y] of [[this._topLabel, top - 12], [this._bottomLabel, base + 1]]) {
+            if (!text)
+                continue;
+            const layout = PangoCairo.create_layout(cr);
+            layout.set_font_description(Pango.FontDescription.from_string(AXIS_FONT));
+            layout.set_text(text, -1);
+            const [textWidth] = layout.get_pixel_size();
+            source(cr, [169, 183, 204], 0.55);
+            cr.moveTo(Math.max(2, left - 6 - textWidth), y);
+            PangoCairo.show_layout(cr, layout);
+        }
+    }
+
+    _drawLine(cr, {left, base, plotWidth, nodes}) {
+        paintSeries(cr, {nodes, groups: runs(this.points), spans: smoothSpans(nodes),
+            color: this._color, left, base, plotWidth, fill: this._fill});
     }
 });
