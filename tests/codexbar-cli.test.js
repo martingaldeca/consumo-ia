@@ -44,6 +44,24 @@ try {
         assert(window.usedPercent === 12 && window.windowMinutes === 10080);
         assert(Date.parse(window.resetsAt) === resetAt * 1000);
     });
+
+    test('El adaptador conserva una instalación de CodexBar que ya ofrece la CLI nativa', () => {
+        const native = GLib.build_filenamev([temporaryDirectory, 'native-codexbar']);
+        GLib.file_set_contents(native, '#!/bin/sh\nif [ "$2" = "--help" ]; then echo "Usage: codexbar usage"; else echo native-cli; fi\n');
+        GLib.spawn_sync(null, ['chmod', '755', native], null, GLib.SpawnFlags.SEARCH_PATH, null);
+        const [ok, stdout, stderr, status] = GLib.spawn_sync(null, [
+            '/usr/bin/env',
+            'CODEXBAR_WAYBAR_BINARY=' + native,
+            'CODEXBAR_CACHE_FILE=' + cache,
+            '/bin/bash', adapter,
+            'usage', '--provider', 'codex', '--source', 'oauth', '--format', 'json', '--no-credits',
+        ], null, GLib.SpawnFlags.SEARCH_PATH, null);
+        assert(ok);
+        GLib.spawn_check_wait_status(status);
+        assert(new TextDecoder().decode(stdout).trim() === 'native-cli');
+        assert(new TextDecoder().decode(stderr).length === 0);
+        GLib.unlink(native);
+    });
 } finally {
     GLib.unlink(helper);
     GLib.unlink(cache);

@@ -31,6 +31,11 @@ if [[ ! -x "$waybar_binary" ]]; then
     echo "No se encuentra el proveedor CodexBar en $waybar_binary" >&2
     exit 1
 fi
+
+if "$waybar_binary" usage --help 2>&1 | grep -q '^Usage:'; then
+    exec "$waybar_binary" usage "$@"
+fi
+
 command -v jq >/dev/null || { echo 'Se necesita jq para leer el uso de Codex' >&2; exit 1; }
 
 # Reuse the authenticated CodexBar fetcher. Its output is deliberately ignored;
