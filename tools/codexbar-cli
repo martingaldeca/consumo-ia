@@ -7,6 +7,7 @@ if [[ "${1:-}" != "usage" ]]; then
     exit 2
 fi
 shift
+forwarded_args=("$@")
 
 while (($#)); do
     case "$1" in
@@ -33,7 +34,7 @@ if [[ ! -x "$waybar_binary" ]]; then
 fi
 
 if "$waybar_binary" usage --help 2>&1 | grep -q '^Usage:'; then
-    exec "$waybar_binary" usage "$@"
+    exec "$waybar_binary" usage "${forwarded_args[@]}"
 fi
 
 command -v jq >/dev/null || { echo 'Se necesita jq para leer el uso de Codex' >&2; exit 1; }
