@@ -57,7 +57,7 @@ Los tokens de DeepSeek no se copian: la extensión guarda en `consumo-ia/session
 
 Los huecos de más de 15 minutos se dibujan con trazo discontinuo. Una única muestra inicial es normal: hacen falta varias para ver la evolución. No hay un servicio adicional cuando la extensión está desactivada.
 
-Las tres consultas son independientes y tienen un límite de 25 segundos. Un fallo conserva los últimos datos válidos e indica su antigüedad. El historial local sobrevive al cierre de sesión.
+Las tres consultas son independientes y tienen un límite de 25 segundos. Un fallo conserva los últimos datos válidos e indica su antigüedad. Si una consulta se queda sin respuesta, al cumplirse el límite se descarta y la siguiente actualización la reintenta, en lugar de bloquear ese proveedor durante el resto de la sesión. El historial local sobrevive al cierre de sesión.
 
 ## Comprobaciones
 

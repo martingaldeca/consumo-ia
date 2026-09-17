@@ -9,6 +9,12 @@ function assert(value) {
     if (!value)
         throw new Error('Assertion failed');
 }
+function sleep(ms) {
+    return new Promise(resolve => GLib.timeout_add(GLib.PRIORITY_DEFAULT, ms, () => {
+        resolve();
+        return GLib.SOURCE_REMOVE;
+    }));
+}
 async function test(name, run) {
     await run();
     passed++;
@@ -79,6 +85,41 @@ async function run() {
         complete({remaining: 88});
         await request;
         assert(notifications === 1 && monitor.jobs.size === 0);
+    });
+    await test('Una consulta que nunca responde se libera y no bloquea al proveedor', async () => {
+        let calls = 0;
+        let complete;
+        const monitor = new UsageMonitor(() => {}, {codex: () => {
+            calls++;
+            return new Promise(resolve => { complete = resolve; });
+        }}, 50);
+        const first = monitor.refresh('codex');
+        await sleep(200);
+        assert(monitor.states.codex.error === 'timeout');
+        assert(monitor.states.codex.refreshing === false && monitor.jobs.size === 0);
+        complete({remaining: 12});
+        await first;
+        assert(monitor.states.codex.data === null);
+        monitor.refresh('codex');
+        assert(calls === 2);
+        monitor.dispose();
+    });
+    await test('Un fallo al repintar el panel no bloquea las consultas', async () => {
+        let calls = 0;
+        let broken = true;
+        const monitor = new UsageMonitor(() => {
+            if (!broken)
+                return;
+            broken = false;
+            throw new Error('render');
+        }, {codex: async () => ({remaining: ++calls})});
+        const logged = [];
+        monitor.logger = message => logged.push(message);
+        await monitor.refresh('codex');
+        await monitor.refresh('codex');
+        assert(calls === 2 && monitor.states.codex.data.remaining === 2);
+        assert(monitor.jobs.size === 0 && monitor.states.codex.refreshing === false && logged.length === 1);
+        monitor.dispose();
     });
     print(passed + ' pruebas de actualización correctas.');
 }
